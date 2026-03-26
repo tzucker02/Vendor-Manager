@@ -340,7 +340,7 @@ class VendorApp(ctk.CTk):
         # Header
         header = ctk.CTkFrame(self, height=60, fg_color="#2b2b2b")
         header.pack(fill="x")
-        ctk.CTkLabel(header, text=f"Welcome, {self.current_user}", font=ctk.CTkFont(size=16)).pack(side="left", padx=20)
+        ctk.CTkLabel(header, text=f"Welcome, {self.fullname}", font=ctk.CTkFont(size=16)).pack(side="left", padx=20)
         ctk.CTkButton(header, text="Logout", width=80, command=self.show_login_screen).pack(side="right", padx=20)
 
         # Main Layout
