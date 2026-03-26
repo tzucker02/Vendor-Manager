@@ -236,6 +236,23 @@ class VendorApp(ctk.CTk):
         cleaned = re.sub(r"[^\d]", "", phone)
         return len(cleaned) >= 7
 
+    def bring_dialog_to_front(self, dialog):
+        """
+        Helper method to ensure a dialog window comes to the front and gains focus.
+        Works across Windows, Linux, and macOS.
+        """
+        try:
+            # Set topmost briefly to force it to the front
+            dialog.attributes('-topmost', True)
+            dialog.lift()
+            dialog.focus_force()
+            # Reset topmost so it doesn't stay on top of everything forever
+            dialog.attributes('-topmost', False)
+        except Exception:
+            # Fallback for systems where attributes might behave differently
+            dialog.lift()
+            dialog.focus_force()
+
     def open_profile(self):
         profile = self.db.get_user_profile(self.current_user) or {
             "full_name": "",
@@ -247,6 +264,9 @@ class VendorApp(ctk.CTk):
         dialog = ctk.CTkToplevel(self)
         dialog.title("My Profile")
         dialog.geometry("420x360")
+        
+        # Ensure dialog comes to front
+        self.bring_dialog_to_front(dialog)
         
         ctk.CTkLabel(dialog, text="Full Name").pack(pady=5)
         full_name_entry = ctk.CTkEntry(dialog, width=320)
@@ -285,10 +305,11 @@ class VendorApp(ctk.CTk):
             self.db.save_user_profile(self.current_user, full_name, email, phone, last_updated)
             last_updated_label.configure(text=f"Last Updated: {last_updated}")
             messagebox.showinfo("Success", "Profile saved.")
-            dialog.destroy() # Close after saving to simplify flow. Remove this line if you want to keep the dialog open.
+            dialog.destroy()
             
         ctk.CTkButton(dialog, text="Save Profile", command=save_profile).pack(pady=12)
         ctk.CTkButton(dialog, text="Cancel", command=dialog.destroy).pack(pady=6)
+
     def clear_frame(self):
         for widget in self.winfo_children():
             widget.destroy()
@@ -352,7 +373,6 @@ class VendorApp(ctk.CTk):
             font=ctk.CTkFont(size=16)
         ).pack(side="left", padx=20)
         
-        # ctk.CTkLabel(header, text=f"Welcome, {self.current_user}", font=ctk.CTkFont(size=16)).pack(side="left", padx=20)
         ctk.CTkButton(header, text="Logout", width=80, command=self.show_login_screen).pack(side="right", padx=20)
 
         # Main Layout
@@ -377,7 +397,6 @@ class VendorApp(ctk.CTk):
         self.refresh_vendor_list()
 
     def refresh_vendor_list(self):
-        # Keep the preview list scoped to the dashboard list frame.
         if not hasattr(self, "vendor_list_frame"):
             return
 
@@ -392,10 +411,12 @@ class VendorApp(ctk.CTk):
             lbl.pack(fill="x", pady=2)
 
     def open_add_vendor(self):
-        # Simplified dialog for prototype
         dialog = ctk.CTkToplevel(self)
         dialog.title("Add New Vendor")
         dialog.geometry("400x500")
+
+        # Ensure dialog comes to front
+        self.bring_dialog_to_front(dialog)
 
         ctk.CTkLabel(dialog, text="Vendor Name").pack(pady=5)
         name = ctk.CTkEntry(dialog)
@@ -462,6 +483,9 @@ class VendorApp(ctk.CTk):
         dialog.title("Add Payment Method")
         dialog.geometry("300x200")
 
+        # Ensure dialog comes to front
+        self.bring_dialog_to_front(dialog)
+
         ctk.CTkLabel(dialog, text="Method Name (e.g., Visa ending 1234)").pack(pady=10)
         name = ctk.CTkEntry(dialog)
         name.pack(pady=5)
@@ -488,25 +512,24 @@ class VendorApp(ctk.CTk):
         ctk.CTkButton(dialog, text="Save", command=save).pack(pady=10)
 
     def open_scanner(self):
-        # Simulates scanning an image file
         file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")])
         if file_path:
             try:
-                # Load image
                 img = cv2.imread(file_path)
                 if img is None:
                     raise ValueError("Selected file could not be read as an image.")
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-                # Perform OCR
                 text = pytesseract.image_to_string(gray)
                 if not text.strip():
                     text = "[No text detected in image.]"
 
-                # Display result
                 result_window = ctk.CTkToplevel(self)
                 result_window.title("Scan Results")
                 result_window.geometry("500x400")
+
+                # Ensure dialog comes to front
+                self.bring_dialog_to_front(result_window)
 
                 ctk.CTkLabel(result_window, text="Extracted Text:", font=ctk.CTkFont(weight="bold")).pack(pady=10)
 
@@ -534,11 +557,13 @@ class VendorApp(ctk.CTk):
         self.open_add_vendor()
 
     def view_vendors(self):
-        # Simple list view
         vendors = self.db.get_all_vendors()
         list_window = ctk.CTkToplevel(self)
         list_window.title("All Vendors")
         list_window.geometry("600x400")
+
+        # Ensure dialog comes to front
+        self.bring_dialog_to_front(list_window)
 
         text_area = ctk.CTkTextbox(list_window, wrap="word")
         text_area.pack(fill="both", expand=True, padx=10, pady=10)
