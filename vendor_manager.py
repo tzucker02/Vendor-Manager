@@ -607,6 +607,18 @@ class VendorApp(ctk.CTk):
 
         bid, vendor_name, desc, cat, amount, paid_amt, due_str, paid_date, freq, status, c1, c2, c3, notes = bill_data
 
+        # Guard against NULL values so widget insert/set calls do not fail mid-render.
+        vendor_name = vendor_name or ""
+        desc = desc or ""
+        cat = cat or ""
+        due_str = due_str or ""
+        freq = freq or ""
+        status = status or "Pending"
+        c1 = c1 or ""
+        c2 = c2 or ""
+        c3 = c3 or ""
+        notes = notes or ""
+
         edit_win = ctk.CTkToplevel(self)
         edit_win.title("Edit Bill")
         edit_win.geometry("400x700")
@@ -638,7 +650,7 @@ class VendorApp(ctk.CTk):
         ctk.CTkLabel(scroll_frame, text="Category", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
         categories = self.db.get_categories()
         cat_combo = ctk.CTkComboBox(scroll_frame, values=categories, height=28, width=300)
-        cat_combo.set(cat)
+        cat_combo.set(cat if cat in categories else (categories[0] if categories else ""))
         cat_combo.pack(pady=2)
 
         ctk.CTkLabel(scroll_frame, text="Amount ($)", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
@@ -653,7 +665,9 @@ class VendorApp(ctk.CTk):
 
         ctk.CTkLabel(scroll_frame, text="Frequency", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
         freq_combo = ctk.CTkComboBox(scroll_frame, values=self.db.get_frequency_options(), height=28, width=300)
-        freq_combo.set(freq)
+        freq_values = self.db.get_frequency_options()
+        freq_combo.configure(values=freq_values)
+        freq_combo.set(freq if freq in freq_values else (freq_values[0] if freq_values else ""))
         freq_combo.pack(pady=2)
 
         ctk.CTkLabel(scroll_frame, text="Status", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
