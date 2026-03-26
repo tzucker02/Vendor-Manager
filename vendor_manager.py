@@ -247,7 +247,7 @@ class VendorApp(ctk.CTk):
         dialog = ctk.CTkToplevel(self)
         dialog.title("My Profile")
         dialog.geometry("420x360")
-
+        
         ctk.CTkLabel(dialog, text="Full Name").pack(pady=5)
         full_name_entry = ctk.CTkEntry(dialog, width=320)
         full_name_entry.pack(pady=5)
@@ -285,9 +285,10 @@ class VendorApp(ctk.CTk):
             self.db.save_user_profile(self.current_user, full_name, email, phone, last_updated)
             last_updated_label.configure(text=f"Last Updated: {last_updated}")
             messagebox.showinfo("Success", "Profile saved.")
-
+            dialog.destroy() # Close after saving to simplify flow. Remove this line if you want to keep the dialog open.
+            
         ctk.CTkButton(dialog, text="Save Profile", command=save_profile).pack(pady=12)
-
+        ctk.CTkButton(dialog, text="Cancel", command=dialog.destroy).pack(pady=6)
     def clear_frame(self):
         for widget in self.winfo_children():
             widget.destroy()
@@ -340,7 +341,18 @@ class VendorApp(ctk.CTk):
         # Header
         header = ctk.CTkFrame(self, height=60, fg_color="#2b2b2b")
         header.pack(fill="x")
-        ctk.CTkLabel(header, text=f"Welcome, {self.current_user}", font=ctk.CTkFont(size=16)).pack(side="left", padx=20)
+        
+        profile = self.db.get_user_profile(self.current_user) or {}
+        display_name = profile.get("full_name", "").strip()
+        first_name = display_name.split()[0] if display_name else self.current_user
+
+        ctk.CTkLabel(
+            header,
+            text=f"Welcome, {first_name}",
+            font=ctk.CTkFont(size=16)
+        ).pack(side="left", padx=20)
+        
+        # ctk.CTkLabel(header, text=f"Welcome, {self.current_user}", font=ctk.CTkFont(size=16)).pack(side="left", padx=20)
         ctk.CTkButton(header, text="Logout", width=80, command=self.show_login_screen).pack(side="right", padx=20)
 
         # Main Layout
