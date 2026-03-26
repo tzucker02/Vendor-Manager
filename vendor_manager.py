@@ -392,10 +392,22 @@ class VendorApp(ctk.CTk):
             lbl.pack(fill="x", pady=1)
 
     def open_manage_bills(self):
+        existing_dialog = getattr(self, "manage_bills_dialog", None)
+        if existing_dialog is not None and existing_dialog.winfo_exists():
+            existing_dialog.destroy()
+
         dialog = ctk.CTkToplevel(self)
+        self.manage_bills_dialog = dialog
         dialog.title("Manage Bills")
         dialog.geometry("900x600")
         self.bring_dialog_to_front(dialog)
+
+        def close_manage_bills():
+            if hasattr(self, "manage_bills_dialog"):
+                self.manage_bills_dialog = None
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", close_manage_bills)
 
         header_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         header_frame.pack(fill="x", padx=10, pady=10)
@@ -413,9 +425,14 @@ class VendorApp(ctk.CTk):
             today = datetime.now()
             for bill in bills:
                 bid, vendor, desc, cat, amount, paid_amt, due_str, paid_date, freq, status, c1, c2, c3, notes = bill
-                
-                due_date = datetime.strptime(due_str, "%Y-%m-%d")
-                days_diff = (due_date - today).days
+
+                try:
+                    due_date = datetime.strptime(due_str, "%Y-%m-%d")
+                    days_diff = (due_date - today).days
+                    due_display = f"{due_str} ({days_diff} days)"
+                except (TypeError, ValueError):
+                    days_diff = 0
+                    due_display = f"{due_str} (invalid date)"
                 
                 outstanding = amount - paid_amt
                 is_overdue = days_diff < 0 and status != "Paid"
@@ -446,7 +463,7 @@ class VendorApp(ctk.CTk):
                 top_line = f"{vendor} - {desc} ({cat})"
                 ctk.CTkLabel(details_frame, text=top_line, font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w")
                 
-                bottom_line = f"Freq: {freq} | Due: {due_str} ({days_diff} days) | Paid: ${paid_amt:.2f} / ${amount:.2f}"
+                bottom_line = f"Freq: {freq} | Due: {due_display} | Paid: ${paid_amt:.2f} / ${amount:.2f}"
                 ctk.CTkLabel(details_frame, text=bottom_line, font=ctk.CTkFont(size=11), text_color="#aaaaaa").pack(anchor="w")
                 
                 if c1 or c2 or c3:
@@ -460,7 +477,7 @@ class VendorApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         btn_frame.pack(pady=10)
-        ctk.CTkButton(btn_frame, text="Close", width=100, height=28, command=dialog.destroy).pack(pady=5)
+        ctk.CTkButton(btn_frame, text="Close", width=100, height=28, command=close_manage_bills).pack(pady=5)
 
     def open_add_bill_dialog(self, parent_window):
         add_win = ctk.CTkToplevel(parent_window)
@@ -862,7 +879,7 @@ class VendorApp(ctk.CTk):
 
         ctk.CTkLabel(profile_win, text="My Profile", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
 
-        profile_data = self.db.get_user_profile(self.current_user)
+        profile_data = self.db.get_user_profile(self.current_user) or {}
         
         ctk.CTkLabel(profile_win, text="Full Name", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
         name_entry = ctk.CTkEntry(profile_win, height=28, width=300)
