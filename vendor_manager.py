@@ -595,11 +595,16 @@ class VendorApp(ctk.CTk):
         edit_win.geometry("400x700")
         self.bring_dialog_to_front(edit_win)
 
+        # Title at top
         ctk.CTkLabel(edit_win, text="Edit Bill", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
 
-        # Create scrollable frame for form fields (no expand, fixed height)
-        scroll_frame = ctk.CTkScrollableFrame(edit_win, width=360, height=500)
-        scroll_frame.pack(fill="both", padx=10, pady=5)
+        # Main content area (scrollable in middle)
+        main_frame = ctk.CTkFrame(edit_win, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Create scrollable frame for form fields
+        scroll_frame = ctk.CTkScrollableFrame(main_frame, width=360)
+        scroll_frame.pack(fill="both", expand=True)
 
         ctk.CTkLabel(scroll_frame, text="Vendor", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
         vendors = self.db.get_all_vendors()
@@ -696,9 +701,9 @@ class VendorApp(ctk.CTk):
             except Exception as e:
                 messagebox.showerror("Error", f"Could not update bill: {str(e)}")
 
-        # Button frame stays outside scroll area (always visible)
+        # Button frame at bottom (outside main_frame, always visible)
         btn_frame = ctk.CTkFrame(edit_win, fg_color="transparent")
-        btn_frame.pack(pady=10, fill="x")
+        btn_frame.pack(pady=10, fill="x", side="bottom")
         ctk.CTkButton(btn_frame, text="Save Changes", width=120, height=30, command=save_edits).pack(side="left", padx=10)
         ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=edit_win.destroy).pack(side="left", padx=10)
 
