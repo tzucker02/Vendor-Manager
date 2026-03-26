@@ -32,7 +32,7 @@ class DatabaseManager:
         self.seed_sample_data()
 
     def create_tables(self):
-        # --- Users & Profiles (Existing) ---
+        # --- Users & Profiles ---
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL)""")
         
@@ -40,37 +40,37 @@ class DatabaseManager:
             user_id INTEGER PRIMARY KEY, full_name TEXT, email TEXT, phone TEXT, last_updated TEXT,
             FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)""")
 
-        # --- Billing Cycles & Payment Methods (Existing) ---
+        # --- Billing Cycles & Payment Methods ---
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS billing_cycles (
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
         
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS payment_methods (
             id INTEGER PRIMARY KEY AUTOINCREMENT, method_name TEXT NOT NULL, account_last_four TEXT, is_default BOOLEAN DEFAULT 0)""")
 
-        # --- Vendors (Existing) ---
+        # --- Vendors ---
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS vendors (
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT, phone TEXT,
             account_number TEXT, billing_cycle_id INTEGER, payment_method_id INTEGER, notes TEXT,
             last_scan_data TEXT, FOREIGN KEY(billing_cycle_id) REFERENCES billing_cycles(id),
             FOREIGN KEY(payment_method_id) REFERENCES payment_methods(id))""")
 
-        # --- NEW: Enhanced Bills Table ---
+        # --- Bills ---
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS bills (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vendor_id INTEGER NOT NULL,
             description TEXT,
-            category TEXT,                  -- e.g., Utilities, Rent, Software
+            category TEXT,
             amount REAL NOT NULL,
             paid_amount REAL DEFAULT 0,
-            due_date TEXT NOT NULL,         -- YYYY-MM-DD
-            paid_date TEXT,                 -- YYYY-MM-DD (NULL if unpaid)
-            frequency TEXT,                 -- Weekly, Bi-Weekly, Monthly, Semi-Annual, Annual, Infrequent, Custom
-            is_recurring BOOLEAN DEFAULT 0, -- 1 if this bill generates future instances
-            receipt_path TEXT,              -- Path to scanned image
-            status TEXT DEFAULT 'Pending',  -- Pending, Paid, Overdue, Disputed
-            custom_field_1 TEXT,            -- User Defined 1
-            custom_field_2 TEXT,            -- User Defined 2
-            custom_field_3 TEXT,            -- User Defined 3
+            due_date TEXT NOT NULL,
+            paid_date TEXT,
+            frequency TEXT,
+            is_recurring BOOLEAN DEFAULT 0,
+            receipt_path TEXT,
+            status TEXT DEFAULT 'Pending',
+            custom_field_1 TEXT,
+            custom_field_2 TEXT,
+            custom_field_3 TEXT,
             notes TEXT,
             created_at TEXT,
             FOREIGN KEY(vendor_id) REFERENCES vendors(id) ON DELETE CASCADE
@@ -86,13 +86,11 @@ class DatabaseManager:
         self.conn.commit()
 
     def seed_sample_data(self):
-        # Check if vendors exist
         self.cursor.execute("SELECT count(*) FROM vendors")
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute("SELECT id FROM billing_cycles WHERE name='Monthly'")
             cycle_id = self.cursor.fetchone()[0]
             
-            # Create Sample Vendor
             self.cursor.execute(
                 "INSERT INTO vendors (name, address, phone, account_number, billing_cycle_id) VALUES (?, ?, ?, ?, ?)",
                 ("Sample Vendor Inc.", "123 Business Rd", "555-0199", "ACC-001", cycle_id)
@@ -100,7 +98,6 @@ class DatabaseManager:
             vendor_id = self.cursor.lastrowid
             
             today = datetime.now()
-            # Sample Bills with Categories and Frequencies
             bills = [
                 (vendor_id, "Office Rent", "Rent", 1500.00, 0.00, (today + timedelta(days=5)).strftime("%Y-%m-%d"), "Monthly", 1, "Pending", "Office", "", ""),
                 (vendor_id, "Internet Service", "Utilities", 89.99, 89.99, (today - timedelta(days=2)).strftime("%Y-%m-%d"), "Monthly", 1, "Paid", "ISP", "", ""),
@@ -115,7 +112,6 @@ class DatabaseManager:
                 """, (*b, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             self.conn.commit()
 
-    # --- Standard Auth & Vendor Methods (Unchanged logic, kept for brevity in thought process, but included in full code below) ---
     def register_user(self, username, password):
         hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         try:
@@ -142,9 +138,12 @@ class DatabaseManager:
         if not cycle_row: raise ValueError("Please select a valid billing cycle.")
         cycle_id = cycle_row[0]
 
-        self.cursor.execute("SELECT id FROM payment_methods WHERE method_name=?", (method_name,))
-        method_row = self.cursor.fetchone()
-        method_id = method_row[0] if method_row else None
+        method_id = None
+        if method_name and method_name != "None":
+            self.cursor.execute("SELECT id FROM payment_methods WHERE method_name=?", (method_name,))
+            method_row = self.cursor.fetchone()
+            if method_row:
+                method_id = method_row[0]
 
         self.cursor.execute("""INSERT INTO vendors (name, address, phone, account_number, billing_cycle_id, payment_method_id, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?)""", (name, address, phone, account, cycle_id, method_id, notes))
@@ -190,9 +189,7 @@ class DatabaseManager:
             (user_id, full_name, email, phone, last_updated))
         self.conn.commit()
 
-    # --- NEW: Bill Management Methods ---
     def get_all_bills(self):
-        """Returns bills joined with vendor names, sorted by due date."""
         self.cursor.execute("""
             SELECT b.id, v.name as vendor_name, b.description, b.category, b.amount, b.paid_amount, 
                    b.due_date, b.paid_date, b.frequency, b.status, b.custom_field_1, b.custom_field_2, b.custom_field_3, b.notes
@@ -211,25 +208,45 @@ class DatabaseManager:
         return self.cursor.lastrowid
 
     def update_bill_status(self, bill_id, is_paid, paid_amount=None):
-        if paid_amount is not None:
-            new_status = "Paid" if is_paid and paid_amount >= self.get_bill_amount(bill_id) else "Pending"
-            self.cursor.execute("UPDATE bills SET is_paid=?, paid_amount=?, status=? WHERE id=?",
-                                (1 if is_paid else 0, paid_amount, new_status, bill_id))
-        else:
-            self.cursor.execute("SELECT amount FROM bills WHERE id=?", (bill_id,))
-            row = self.cursor.fetchone()
-            if row:
-                amount = row[0]
-                new_paid = amount if is_paid else 0
-                new_status = "Paid" if is_paid else "Pending"
-                self.cursor.execute("UPDATE bills SET is_paid=?, paid_amount=?, status=?, paid_date=? WHERE id=?",
-                                    (1 if is_paid else 0, new_paid, new_status, datetime.now().strftime("%Y-%m-%d") if is_paid else None, bill_id))
-        self.conn.commit()
-
-    def get_bill_amount(self, bill_id):
         self.cursor.execute("SELECT amount FROM bills WHERE id=?", (bill_id,))
         row = self.cursor.fetchone()
-        return row[0] if row else 0
+        if not row: return
+        
+        amount = row[0]
+        new_paid = paid_amount if paid_amount is not None else (amount if is_paid else 0)
+        
+        # Ensure paid amount doesn't exceed total
+        if new_paid > amount:
+            new_paid = amount
+            
+        new_status = "Paid" if new_paid >= amount else ("Overdue" if is_paid else "Pending")
+        if is_paid and new_paid == 0:
+             new_status = "Pending" # Edge case: marked paid but 0 amount?
+
+        paid_date_val = datetime.now().strftime("%Y-%m-%d") if is_paid and new_paid >= amount else None
+        
+        self.cursor.execute("""UPDATE bills 
+            SET paid_amount=?, status=?, paid_date=? 
+            WHERE id=?""", (new_paid, new_status, paid_date_val, bill_id))
+        self.conn.commit()
+
+    def get_bill_details(self, bill_id):
+        self.cursor.execute("""
+            SELECT b.id, v.name as vendor_name, b.description, b.category, b.amount, b.paid_amount, 
+                   b.due_date, b.paid_date, b.frequency, b.status, b.custom_field_1, b.custom_field_2, b.custom_field_3, b.notes
+            FROM bills b
+            JOIN vendors v ON b.vendor_id = v.id
+            WHERE b.id = ?
+        """, (bill_id,))
+        return self.cursor.fetchone()
+
+    def update_bill(self, bill_id, vendor_id, description, category, amount, due_date, frequency, status, custom1, custom2, custom3, notes):
+        self.cursor.execute("""
+            UPDATE bills SET vendor_id=?, description=?, category=?, amount=?, due_date=?, frequency=?, status=?, 
+            custom_field_1=?, custom_field_2=?, custom_field_3=?, notes=?
+            WHERE id=?
+        """, (vendor_id, description, category, amount, due_date, frequency, status, custom1, custom2, custom3, notes, bill_id))
+        self.conn.commit()
 
     def get_vendor_by_name(self, name):
         self.cursor.execute("SELECT id FROM vendors WHERE name=?", (name,))
@@ -240,7 +257,6 @@ class DatabaseManager:
         return ["Weekly", "Bi-Weekly", "Monthly", "Semi-Annual", "Annual", "Infrequent", "Custom"]
 
     def get_categories(self):
-        # Hardcoded categories + dynamic ones could be added later
         return ["Rent", "Utilities", "Software", "Services", "Supplies", "Insurance", "Taxes", "Other"]
 
 # --- Helper Functions for OCR ---
@@ -291,7 +307,6 @@ class VendorApp(ctk.CTk):
             dialog.lift()
             dialog.focus_force()
 
-    # --- UI Methods (Login, Dashboard, etc. - Simplified for brevity, keeping core logic) ---
     def clear_frame(self):
         for widget in self.winfo_children(): widget.destroy()
 
@@ -376,20 +391,17 @@ class VendorApp(ctk.CTk):
             lbl = ctk.CTkLabel(self.vendor_list_frame, text=f"{v[0]} | Cycle: {v[4]} | Method: {method}", anchor="w", font=ctk.CTkFont(size=11))
             lbl.pack(fill="x", pady=1)
 
-    # --- NEW: Manage Bills Dialog (The Core Request) ---
     def open_manage_bills(self):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Manage Bills")
         dialog.geometry("900x600")
         self.bring_dialog_to_front(dialog)
 
-        # Header
         header_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         header_frame.pack(fill="x", padx=10, pady=10)
         ctk.CTkLabel(header_frame, text="Bill Management", font=ctk.CTkFont(size=18, weight="bold")).pack(side="left")
         ctk.CTkButton(header_frame, text="+ Add New Bill", width=120, height=30, command=lambda: self.open_add_bill_dialog(dialog)).pack(side="right")
 
-        # Scrollable List
         scroll_frame = ctk.CTkScrollableFrame(dialog, width=860, height=450)
         scroll_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -400,7 +412,6 @@ class VendorApp(ctk.CTk):
         else:
             today = datetime.now()
             for bill in bills:
-                # Structure: id, vendor, desc, cat, amt, paid, due, paid_date, freq, status, c1, c2, c3, notes
                 bid, vendor, desc, cat, amount, paid_amt, due_str, paid_date, freq, status, c1, c2, c3, notes = bill
                 
                 due_date = datetime.strptime(due_str, "%Y-%m-%d")
@@ -409,12 +420,11 @@ class VendorApp(ctk.CTk):
                 outstanding = amount - paid_amt
                 is_overdue = days_diff < 0 and status != "Paid"
                 
-                # Color Coding
                 if status == "Paid":
-                    row_bg = "#2a3a2a" # Dark Greenish
+                    row_bg = "#2a3a2a"
                     text_color = "#4dff4d"
                 elif is_overdue:
-                    row_bg = "#3a2a2a" # Dark Reddish
+                    row_bg = "#3a2a2a"
                     text_color = "#ff4d4d"
                 else:
                     row_bg = "#2a2a2a"
@@ -423,7 +433,6 @@ class VendorApp(ctk.CTk):
                 row_frame = ctk.CTkFrame(scroll_frame, fg_color=row_bg, corner_radius=5)
                 row_frame.pack(fill="x", pady=4, padx=5)
 
-                # Left: Checkbox & Status
                 var = ctk.BooleanVar(value=(status == "Paid"))
                 chk = ctk.CTkCheckBox(row_frame, text="", variable=var, command=lambda b=bid, v=var: self.toggle_bill_status(b, v.get()))
                 chk.pack(side="left", padx=10, pady=10)
@@ -431,7 +440,6 @@ class VendorApp(ctk.CTk):
                 status_lbl = ctk.CTkLabel(row_frame, text=status, font=ctk.CTkFont(size=11, weight="bold"), text_color=text_color)
                 status_lbl.pack(side="left", padx=5)
 
-                # Middle: Details
                 details_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
                 details_frame.pack(side="left", fill="x", expand=True, padx=10)
                 
@@ -445,7 +453,6 @@ class VendorApp(ctk.CTk):
                     custom_line = f"Custom: {c1} | {c2} | {c3}"
                     ctk.CTkLabel(details_frame, text=custom_line, font=ctk.CTkFont(size=10), text_color="#888888").pack(anchor="w")
 
-                # Right: Actions
                 btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
                 btn_frame.pack(side="right", padx=10)
                 ctk.CTkButton(btn_frame, text="Edit", width=60, height=24, command=lambda b=bid: self.edit_bill(b)).pack(padx=2)
@@ -456,15 +463,13 @@ class VendorApp(ctk.CTk):
         ctk.CTkButton(btn_frame, text="Close", width=100, height=28, command=dialog.destroy).pack(pady=5)
 
     def open_add_bill_dialog(self, parent_window):
-        # Create a new window for adding a bill
         add_win = ctk.CTkToplevel(parent_window)
         add_win.title("Add New Bill")
-        add_win.geometry("400x850") # Increased height slightly for the new field
+        add_win.geometry("400x900")
         self.bring_dialog_to_front(add_win)
 
         ctk.CTkLabel(add_win, text="Bill Details", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
 
-        # --- Vendor Selection (with "Create New" option) ---
         ctk.CTkLabel(add_win, text="Vendor", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
         vendors = self.db.get_all_vendors()
         vendor_names = [v[0] for v in vendors]
@@ -473,10 +478,9 @@ class VendorApp(ctk.CTk):
         vendor_combo = ctk.CTkComboBox(add_win, values=vendor_names, variable=vendor_var, height=28, width=300)
         vendor_combo.pack(pady=2)
 
-        # Dynamic Vendor Creation Frame (Hidden by default)
         new_vendor_frame = ctk.CTkFrame(add_win, fg_color="#333333", corner_radius=5)
         new_vendor_frame.pack(pady=5, fill="x", padx=20)
-        new_vendor_frame.pack_forget() # Hide initially
+        new_vendor_frame.pack_forget()
 
         def on_vendor_change(*args):
             if vendor_var.get() == "--- Create New Vendor ---":
@@ -486,7 +490,6 @@ class VendorApp(ctk.CTk):
         
         vendor_var.trace("w", on_vendor_change)
 
-        # New Vendor Inputs
         ctk.CTkLabel(new_vendor_frame, text="New Vendor Name", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=10)
         new_v_name = ctk.CTkEntry(new_vendor_frame, height=24)
         new_v_name.pack(pady=2, padx=10)
@@ -495,20 +498,16 @@ class VendorApp(ctk.CTk):
         new_v_phone = ctk.CTkEntry(new_vendor_frame, height=24, placeholder_text="Phone")
         new_v_phone.pack(pady=2, padx=10)
 
-        # --- Bill Details ---
         ctk.CTkLabel(add_win, text="Description", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
         desc_entry = ctk.CTkEntry(add_win, height=28, width=300)
         desc_entry.pack(pady=2)
 
-        # --- FIXED: Added Category Dropdown ---
         ctk.CTkLabel(add_win, text="Category", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
         categories = self.db.get_categories()
         cat_combo = ctk.CTkComboBox(add_win, values=categories, height=28, width=300)
         cat_combo.pack(pady=2)
-        # Set a default value if available
         if categories:
             cat_combo.set(categories[0])
-        # ------------------------------------
 
         ctk.CTkLabel(add_win, text="Amount ($)", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
         amt_entry = ctk.CTkEntry(add_win, height=28, width=300)
@@ -537,7 +536,7 @@ class VendorApp(ctk.CTk):
         def save_bill():
             try:
                 desc = desc_entry.get().strip()
-                cat = cat_combo.get() # Retrieve the selected category
+                cat = cat_combo.get()
                 amt = float(amt_entry.get())
                 due = due_entry.get().strip()
                 freq = freq_combo.get()
@@ -549,7 +548,6 @@ class VendorApp(ctk.CTk):
                     messagebox.showwarning("Input", "Description and Due Date are required.")
                     return
 
-                # Handle Vendor
                 selected_vendor = vendor_var.get()
                 vendor_id = None
                 if selected_vendor == "--- Create New Vendor ---":
@@ -557,7 +555,6 @@ class VendorApp(ctk.CTk):
                     if not v_name:
                         messagebox.showwarning("Input", "Vendor Name is required for new vendor.")
                         return
-                    # Create vendor on the fly
                     vendor_id = self.db.add_vendor(v_name, new_v_addr.get().strip(), new_v_phone.get().strip(), "", "Monthly", "No saved methods")
                 else:
                     vendor_id = self.db.get_vendor_by_name(selected_vendor)
@@ -565,11 +562,9 @@ class VendorApp(ctk.CTk):
                         messagebox.showerror("Error", "Vendor not found.")
                         return
 
-                # Pass the category to the database method
                 self.db.create_bill(vendor_id, desc, cat, amt, due, freq, "Pending", c1, c2, c3, "")
                 messagebox.showinfo("Success", "Bill added successfully!")
                 add_win.destroy()
-                # Optionally refresh the parent list here if you have a reference to it
             except ValueError:
                 messagebox.showerror("Error", "Invalid Amount or Date format.")
             except Exception as e:
@@ -583,31 +578,388 @@ class VendorApp(ctk.CTk):
     def toggle_bill_status(self, bill_id, is_paid):
         try:
             self.db.update_bill_status(bill_id, is_paid)
-            self.open_manage_bills() # Refresh the bill list
+            self.open_manage_bills()
         except Exception as e:
             messagebox.showerror("Error", f"Could not update bill status: {str(e)}")
+
     def edit_bill(self, bill_id):
-        messagebox.showinfo("Edit Bill", f"Edit functionality for Bill ID {bill_id} is not implemented yet.")
+        bill_data = self.db.get_bill_details(bill_id)
+        if not bill_data:
+            messagebox.showerror("Error", "Bill not found.")
+            return
+
+        bid, vendor_name, desc, cat, amount, paid_amt, due_str, paid_date, freq, status, c1, c2, c3, notes = bill_data
+
+        edit_win = ctk.CTkToplevel(self)
+        edit_win.title("Edit Bill")
+        edit_win.geometry("400x700")
+        self.bring_dialog_to_front(edit_win)
+
+        ctk.CTkLabel(edit_win, text="Edit Bill", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+
+        # Create scrollable frame for form fields (no expand, fixed height)
+        scroll_frame = ctk.CTkScrollableFrame(edit_win, width=360, height=500)
+        scroll_frame.pack(fill="both", padx=10, pady=5)
+
+        ctk.CTkLabel(scroll_frame, text="Vendor", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
+        vendors = self.db.get_all_vendors()
+        vendor_names = [v[0] for v in vendors]
+        vendor_var = ctk.StringVar(value=vendor_name)
+        vendor_combo = ctk.CTkComboBox(scroll_frame, values=vendor_names, variable=vendor_var, height=28, width=300)
+        vendor_combo.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Description", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
+        desc_entry = ctk.CTkEntry(scroll_frame, height=28, width=300)
+        desc_entry.insert(0, desc)
+        desc_entry.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Category", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        categories = self.db.get_categories()
+        cat_combo = ctk.CTkComboBox(scroll_frame, values=categories, height=28, width=300)
+        cat_combo.set(cat)
+        cat_combo.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Amount ($)", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        amt_entry = ctk.CTkEntry(scroll_frame, height=28, width=300)
+        amt_entry.insert(0, str(amount))
+        amt_entry.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Due Date", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        due_entry = ctk.CTkEntry(scroll_frame, height=28, width=300, placeholder_text="YYYY-MM-DD")
+        due_entry.insert(0, due_str)
+        due_entry.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Frequency", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        freq_combo = ctk.CTkComboBox(scroll_frame, values=self.db.get_frequency_options(), height=28, width=300)
+        freq_combo.set(freq)
+        freq_combo.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Status", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        status_combo = ctk.CTkComboBox(scroll_frame, values=["Pending", "Paid", "Overdue", "Disputed"], height=28, width=300)
+        status_combo.set(status)
+        status_combo.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Custom Field 1", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        c1_entry = ctk.CTkEntry(scroll_frame, height=24, width=300)
+        c1_entry.insert(0, c1)
+        c1_entry.pack(pady=2)
+        
+        ctk.CTkLabel(scroll_frame, text="Custom Field 2", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        c2_entry = ctk.CTkEntry(scroll_frame, height=24, width=300)
+        c2_entry.insert(0, c2)
+        c2_entry.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Custom Field 3", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        c3_entry = ctk.CTkEntry(scroll_frame, height=24, width=300)
+        c3_entry.insert(0, c3)
+        c3_entry.pack(pady=2)
+
+        ctk.CTkLabel(scroll_frame, text="Notes", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        notes_entry = ctk.CTkTextbox(scroll_frame, height=60, width=300)
+        notes_entry.insert("0.0", notes)
+        notes_entry.pack(pady=2, padx=5)
+
+        def save_edits():
+            try:
+                vendor_name = vendor_var.get()
+                vendor_id = self.db.get_vendor_by_name(vendor_name)
+                if not vendor_id:
+                    messagebox.showerror("Error", "Selected vendor not found.")
+                    return
+
+                new_desc = desc_entry.get().strip()
+                new_cat = cat_combo.get()
+                new_amt = float(amt_entry.get())
+                new_due = due_entry.get().strip()
+                new_freq = freq_combo.get()
+                new_status = status_combo.get()
+                new_c1 = c1_entry.get().strip()
+                new_c2 = c2_entry.get().strip()
+                new_c3 = c3_entry.get().strip()
+                new_notes = notes_entry.get("0.0", "end-1c")
+
+                if not new_desc or not new_due:
+                    messagebox.showwarning("Input", "Description and Due Date are required.")
+                    return
+
+                self.db.update_bill(bid, vendor_id, new_desc, new_cat, new_amt, new_due, new_freq, new_status, new_c1, new_c2, new_c3, new_notes)
+                messagebox.showinfo("Success", "Bill updated successfully!")
+                edit_win.destroy()
+                # Refresh the manage bills window if it's open
+                # Note: In a real app, you'd track open windows better, but this works for now
+                try:
+                    self.open_manage_bills() 
+                except:
+                    pass
+            except ValueError:
+                messagebox.showerror("Error", "Invalid Amount or Date format.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not update bill: {str(e)}")
+
+        # Button frame stays outside scroll area (always visible)
+        btn_frame = ctk.CTkFrame(edit_win, fg_color="transparent")
+        btn_frame.pack(pady=10, fill="x")
+        ctk.CTkButton(btn_frame, text="Save Changes", width=120, height=30, command=save_edits).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=edit_win.destroy).pack(side="left", padx=10)
+
     def delete_bill(self, bill_id):
         if messagebox.askyesno("Delete Bill", "Are you sure you want to delete this bill?"):
             try:
                 self.db.cursor.execute("DELETE FROM bills WHERE id=?", (bill_id,))
                 self.db.conn.commit()
-                self.open_manage_bills() # Refresh the bill list
+                self.open_manage_bills()
             except Exception as e:
                 messagebox.showerror("Error", f"Could not delete bill: {str(e)}")
-    def open_profile(self):
-        messagebox.showinfo("Profile", "Profile management is not implemented yet.")
-    def view_vendors(self):
-        messagebox.showinfo("Vendors", "Vendor list view is not implemented yet.")
+
+    # --- IMPLEMENTED: Add Vendor ---
     def open_add_vendor(self):
-        messagebox.showinfo("Add Vendor", "Add Vendor functionality is not implemented yet.")
+        add_win = ctk.CTkToplevel(self)
+        add_win.title("Add New Vendor")
+        add_win.geometry("400x900")
+        self.bring_dialog_to_front(add_win)
+
+        ctk.CTkLabel(add_win, text="Vendor Details", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+
+        ctk.CTkLabel(add_win, text="Name", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
+        name_entry = ctk.CTkEntry(add_win, height=28, width=300)
+        name_entry.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Address", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        addr_entry = ctk.CTkEntry(add_win, height=28, width=300)
+        addr_entry.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Phone", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        phone_entry = ctk.CTkEntry(add_win, height=28, width=300)
+        phone_entry.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Account Number", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        acc_entry = ctk.CTkEntry(add_win, height=28, width=300)
+        acc_entry.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Billing Cycle", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        cycles = self.db.get_billing_cycle_names()
+        cycle_combo = ctk.CTkComboBox(add_win, values=cycles, height=28, width=300)
+        if cycles: cycle_combo.set(cycles[0])
+        cycle_combo.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Payment Method", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        methods = self.db.get_payment_method_names()
+        method_combo = ctk.CTkComboBox(add_win, values=methods, height=28, width=300)
+        method_combo.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Notes", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        notes_entry = ctk.CTkTextbox(add_win, height=60, width=300)
+        notes_entry.pack(pady=2)
+
+        def save_vendor():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showwarning("Input", "Vendor Name is required.")
+                return
+            
+            try:
+                self.db.add_vendor(
+                    name, 
+                    addr_entry.get().strip(), 
+                    phone_entry.get().strip(), 
+                    acc_entry.get().strip(), 
+                    cycle_combo.get(), 
+                    method_combo.get(), 
+                    notes_entry.get("0.0", "end-1c")
+                )
+                messagebox.showinfo("Success", "Vendor added successfully!")
+                add_win.destroy()
+                self.refresh_vendor_list()
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not add vendor: {str(e)}")
+
+        btn_frame = ctk.CTkFrame(add_win, fg_color="transparent")
+        btn_frame.pack(pady=15)
+        ctk.CTkButton(btn_frame, text="Save Vendor", width=120, height=30, command=save_vendor).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=add_win.destroy).pack(side="left", padx=10)
+
+    # --- IMPLEMENTED: Add Payment Method ---
     def open_add_payment(self):
-        messagebox.showinfo("Add Payment", "Add Payment functionality is not implemented yet.")
-    def open_scanner(self): 
-        messagebox.showinfo("Scanner", "OCR Scanner functionality is not implemented yet.")
-    def on_close(self):     self.db.close()
+        add_win = ctk.CTkToplevel(self)
+        add_win.title("Add Payment Method")
+        add_win.geometry("350x300")
+        self.bring_dialog_to_front(add_win)
+
+        ctk.CTkLabel(add_win, text="Payment Method Details", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+
+        ctk.CTkLabel(add_win, text="Method Name (e.g., Visa ending in 1234)", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
+        name_entry = ctk.CTkEntry(add_win, height=28, width=300)
+        name_entry.pack(pady=2)
+
+        ctk.CTkLabel(add_win, text="Last Four Digits", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        last_four_entry = ctk.CTkEntry(add_win, height=28, width=300, placeholder_text="XXXX")
+        last_four_entry.pack(pady=2)
+
+        def save_payment():
+            name = name_entry.get().strip()
+            last_four = last_four_entry.get().strip()
+            
+            if not name or not last_four:
+                messagebox.showwarning("Input", "Both fields are required.")
+                return
+            
+            if not last_four.isdigit() or len(last_four) != 4:
+                messagebox.showwarning("Input", "Last four digits must be exactly 4 numbers.")
+                return
+
+            try:
+                self.db.add_payment_method(name, last_four)
+                messagebox.showinfo("Success", "Payment method added!")
+                add_win.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not add payment method: {str(e)}")
+
+        btn_frame = ctk.CTkFrame(add_win, fg_color="transparent")
+        btn_frame.pack(pady=15)
+        ctk.CTkButton(btn_frame, text="Save", width=120, height=30, command=save_payment).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=add_win.destroy).pack(side="left", padx=10)
+
+    # --- IMPLEMENTED: View Vendors ---
+    def view_vendors(self):
+        view_win = ctk.CTkToplevel(self)
+        view_win.title("All Vendors")
+        view_win.geometry("800x500")
+        self.bring_dialog_to_front(view_win)
+
+        ctk.CTkLabel(view_win, text="Vendor List", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+
+        scroll_frame = ctk.CTkScrollableFrame(view_win, width=760, height=400)
+        scroll_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        vendors = self.db.get_all_vendors()
+        if not vendors:
+            ctk.CTkLabel(scroll_frame, text="No vendors found.", font=ctk.CTkFont(size=12)).pack(pady=20)
+        else:
+            for v in vendors:
+                # v: name, address, phone, account, cycle, method
+                row_frame = ctk.CTkFrame(scroll_frame, fg_color="#2a2a2a", corner_radius=5)
+                row_frame.pack(fill="x", pady=4, padx=5)
+                
+                ctk.CTkLabel(row_frame, text=f"{v[0]}", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=10, pady=10)
+                ctk.CTkLabel(row_frame, text=f"| {v[1]}", font=ctk.CTkFont(size=11), text_color="#aaaaaa").pack(side="left", padx=5)
+                ctk.CTkLabel(row_frame, text=f"| {v[4]}", font=ctk.CTkFont(size=11), text_color="#888888").pack(side="right", padx=10)
+
+        btn_frame = ctk.CTkFrame(view_win, fg_color="transparent")
+        btn_frame.pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Close", width=100, height=28, command=view_win.destroy).pack(pady=5)
+
+    # --- IMPLEMENTED: Profile Management ---
+    def open_profile(self):
+        profile_win = ctk.CTkToplevel(self)
+        profile_win.title("User Profile")
+        profile_win.geometry("400x600")
+        self.bring_dialog_to_front(profile_win)
+
+        ctk.CTkLabel(profile_win, text="My Profile", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+
+        profile_data = self.db.get_user_profile(self.current_user)
+        
+        ctk.CTkLabel(profile_win, text="Full Name", font=ctk.CTkFont(size=12)).pack(pady=(10, 2))
+        name_entry = ctk.CTkEntry(profile_win, height=28, width=300)
+        name_entry.insert(0, profile_data.get("full_name", ""))
+        name_entry.pack(pady=2)
+
+        ctk.CTkLabel(profile_win, text="Email", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        email_entry = ctk.CTkEntry(profile_win, height=28, width=300)
+        email_entry.insert(0, profile_data.get("email", ""))
+        email_entry.pack(pady=2)
+
+        ctk.CTkLabel(profile_win, text="Phone", font=ctk.CTkFont(size=12)).pack(pady=(6, 2))
+        phone_entry = ctk.CTkEntry(profile_win, height=28, width=300)
+        phone_entry.insert(0, profile_data.get("phone", ""))
+        phone_entry.pack(pady=2)
+
+        def save_profile():
+            full_name = name_entry.get().strip()
+            email = email_entry.get().strip()
+            phone = phone_entry.get().strip()
+            
+            if not self._is_valid_email(email):
+                messagebox.showwarning("Input", "Invalid email format.")
+                return
+            if not self._is_valid_phone(phone):
+                messagebox.showwarning("Input", "Invalid phone number format.")
+                return
+
+            try:
+                self.db.save_user_profile(self.current_user, full_name, email, phone, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                messagebox.showinfo("Success", "Profile updated!")
+                profile_win.destroy()
+                # Refresh dashboard welcome message
+                self.show_main_dashboard()
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not update profile: {str(e)}")
+
+        btn_frame = ctk.CTkFrame(profile_win, fg_color="transparent")
+        btn_frame.pack(pady=15)
+        ctk.CTkButton(btn_frame, text="Save", width=120, height=30, command=save_profile).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=profile_win.destroy).pack(side="left", padx=10)
+
+    # --- IMPLEMENTED: OCR Scanner ---
+    def open_scanner(self):
+        # Check if Tesseract is installed (optional, but good practice)
+        is_installed, error_msg = check_tesseract_installed()
+        if not is_installed:
+            # We won't block, but we'll warn the user
+            if messagebox.askyesno("Tesseract Missing", f"{error_msg}\n\nDo you want to open the download page?"):
+                open_tesseract_installer()
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Select Receipt/Invoice Image",
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.tiff")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            # Load image
+            img = cv2.imread(file_path)
+            if img is None:
+                messagebox.showerror("Error", "Could not load image file.")
+                return
+
+            # Preprocessing (optional but recommended)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+            # Extract text
+            text = pytesseract.image_to_string(gray)
+
+            # Show result
+            result_win = ctk.CTkToplevel(self)
+            result_win.title("OCR Results")
+            result_win.geometry("500x800")
+            self.bring_dialog_to_front(result_win)
+
+            ctk.CTkLabel(result_win, text="Extracted Text", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+            
+            text_box = ctk.CTkTextbox(result_win, width=460, height=300)
+            text_box.pack(padx=10, pady=5)
+            text_box.insert("0.0", text)
+            text_box.configure(state="disabled") # Read-only
+
+            ctk.CTkButton(result_win, text="Copy to Clipboard", command=lambda: self.copy_to_clipboard(text)).pack(pady=5)
+            ctk.CTkButton(result_win, text="Close", command=result_win.destroy).pack(pady=5)
+
+        except Exception as e:
+            messagebox.showerror("OCR Error", f"Failed to process image: {str(e)}")
+
+    def copy_to_clipboard(self, text):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        messagebox.showinfo("Copied", "Text copied to clipboard!")
+
+    def on_close(self):
+        self.db.close()
+        self.quit()
+
 if __name__ == "__main__":    
     app = VendorApp()
     app.mainloop()
-
