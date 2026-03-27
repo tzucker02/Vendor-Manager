@@ -2,6 +2,7 @@ import customtkinter as ctk
 import sqlite3
 import bcrypt
 import os
+import shutil
 import subprocess
 import sys
 import platform
@@ -260,12 +261,52 @@ class DatabaseManager:
         return ["Rent", "Utilities", "Software", "Services", "Supplies", "Insurance", "Taxes", "Other"]
 
 # --- Helper Functions for OCR ---
+def _get_tesseract_candidates():
+    candidates = []
+
+    # Preferred source: PATH
+    path_match = shutil.which("tesseract")
+    if path_match:
+        candidates.append(path_match)
+
+    # Keep existing explicit setting if present.
+    configured_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", None)
+    if configured_cmd:
+        candidates.append(configured_cmd)
+
+    if platform.system() == "Windows":
+        windows_candidates = [
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Tesseract-OCR", "tesseract.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Tesseract-OCR", "tesseract.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
+        ]
+        candidates.extend(windows_candidates)
+
+    # Preserve order while removing duplicates/empties.
+    unique_candidates = []
+    seen = set()
+    for item in candidates:
+        normalized = os.path.normpath(item) if item else ""
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(normalized)
+
+    return unique_candidates
+
+
 def check_tesseract_installed():
-    try:
-        subprocess.run(["tesseract", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        return True, None
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        return False, "Tesseract OCR is not installed or not in your system PATH."
+    for candidate in _get_tesseract_candidates():
+        if platform.system() == "Windows" and not os.path.isfile(candidate):
+            continue
+        try:
+            subprocess.run([candidate, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            pytesseract.pytesseract.tesseract_cmd = candidate
+            return True, None
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            continue
+
+    return False, "Tesseract OCR is installed but not accessible. Add it to PATH, or install it to a default location."
 
 def open_tesseract_installer():
     system = platform.system()
@@ -274,6 +315,52 @@ def open_tesseract_installer():
     messagebox.showinfo("Install Tesseract", msg)
     try: webbrowser.open(url)
     except Exception as e: messagebox.showerror("Error", f"Could not open browser: {e}")
+
+
+class WordActionLabel(ctk.CTkLabel):
+    def __init__(self, master, text, command=None, text_color="#7aa2f7", hover_text_color="#9ec1ff", font=None, **kwargs):
+        base_font = font if isinstance(font, ctk.CTkFont) else ctk.CTkFont(size=12)
+        self.normal_font = ctk.CTkFont(
+            family=base_font.cget("family"),
+            size=base_font.cget("size"),
+            weight=base_font.cget("weight"),
+            slant=base_font.cget("slant"),
+            underline=False,
+            overstrike=base_font.cget("overstrike"),
+        )
+        self.hover_font = ctk.CTkFont(
+            family=base_font.cget("family"),
+            size=base_font.cget("size"),
+            weight=base_font.cget("weight"),
+            slant=base_font.cget("slant"),
+            underline=True,
+            overstrike=base_font.cget("overstrike"),
+        )
+        super().__init__(
+            master,
+            text=text,
+            text_color=text_color,
+            fg_color="transparent",
+            cursor="hand2",
+            font=self.normal_font,
+            **kwargs,
+        )
+        self.command = command
+        self.default_text_color = text_color
+        self.hover_text_color = hover_text_color
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    def _on_enter(self, _event):
+        self.configure(text_color=self.hover_text_color, font=self.hover_font)
+
+    def _on_leave(self, _event):
+        self.configure(text_color=self.default_text_color, font=self.normal_font)
+
+    def _on_click(self, _event):
+        if callable(self.command):
+            self.command()
 
 # --- Application UI ---
 class VendorApp(ctk.CTk):
@@ -307,8 +394,28 @@ class VendorApp(ctk.CTk):
             dialog.lift()
             dialog.focus_force()
 
+    def auto_size_window_to_text(self, window, min_width=320, min_height=220, pad_x=24, pad_y=24):
+        window.update_idletasks()
+        req_width = window.winfo_reqwidth() + pad_x
+        req_height = window.winfo_reqheight() + pad_y
+        max_width = int(window.winfo_screenwidth() * 0.9)
+        max_height = int(window.winfo_screenheight() * 0.9)
+        width = max(min_width, min(req_width, max_width))
+        height = max(min_height, min(req_height, max_height))
+        window.geometry(f"{width}x{height}")
+
     def clear_frame(self):
         for widget in self.winfo_children(): widget.destroy()
+
+    def make_word_action(self, parent, text, command, text_color="#7aa2f7", hover_text_color="#9ec1ff", font=None):
+        return WordActionLabel(
+            parent,
+            text=text,
+            command=command,
+            text_color=text_color,
+            hover_text_color=hover_text_color,
+            font=font,
+        )
 
     def show_login_screen(self):
         self.clear_frame()
@@ -321,8 +428,8 @@ class VendorApp(ctk.CTk):
         self.password_entry.pack(pady=5)
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack(pady=8)
-        ctk.CTkButton(btn_frame, text="Login", width=100, height=28, command=self.login).grid(row=0, column=0, padx=8)
-        ctk.CTkButton(btn_frame, text="Register", width=100, height=28, command=self.register).grid(row=0, column=1, padx=8)
+        self.make_word_action(btn_frame, text="Login", command=self.login).grid(row=0, column=0, padx=8)
+        self.make_word_action(btn_frame, text="Register", command=self.register).grid(row=0, column=1, padx=8)
         self.username_entry.focus_set()
 
     def login(self):
@@ -358,28 +465,28 @@ class VendorApp(ctk.CTk):
         display_name = profile.get("full_name", "").strip()
         first_name = display_name.split()[0] if display_name else self.current_user
         ctk.CTkLabel(header, text=f"Welcome, {first_name}", font=ctk.CTkFont(size=14)).pack(side="left", padx=15)
-        ctk.CTkButton(header, text="Logout", width=70, height=28, command=self.show_login_screen).pack(side="right", padx=15)
+        self.make_word_action(header, text="Logout", command=self.show_login_screen).pack(side="right", padx=15)
 
         main_container = ctk.CTkScrollableFrame(self)
         main_container.pack(fill="both", expand=True, padx=15, pady=15)
 
         btn_grid = ctk.CTkFrame(main_container, fg_color="transparent")
         btn_grid.pack(fill="x", pady=5)
-        ctk.CTkButton(btn_grid, text="Add Vendor", command=self.open_add_vendor, width=140, height=32).grid(row=0, column=0, padx=8, pady=5)
-        ctk.CTkButton(btn_grid, text="Add Payment", command=self.open_add_payment, width=140, height=32).grid(row=0, column=1, padx=8, pady=5)
-        ctk.CTkButton(btn_grid, text="Scan OCR", command=self.open_scanner, width=140, height=32).grid(row=0, column=2, padx=8, pady=5)
-        ctk.CTkButton(btn_grid, text="View Vendors", command=self.view_vendors, width=140, height=32).grid(row=0, column=3, padx=8, pady=5)
-        
-        btn_grid2 = ctk.CTkFrame(main_container, fg_color="transparent")
-        btn_grid2.pack(fill="x", pady=5)
-        ctk.CTkButton(btn_grid2, text="Manage Bills", command=self.open_manage_bills, width=140, height=32).grid(row=0, column=0, padx=8, pady=5)
-        ctk.CTkButton(btn_grid2, text="Profile", command=self.open_profile, width=140, height=32).grid(row=0, column=1, padx=8, pady=5)
+        self.make_word_action(btn_grid, text="Add Vendor", command=self.open_add_vendor).grid(row=0, column=0, padx=8, pady=5)
+        self.make_word_action(btn_grid, text="Add Payment", command=self.open_add_payment).grid(row=0, column=1, padx=8, pady=5)
+        self.make_word_action(btn_grid, text="Scan OCR", command=self.open_scanner).grid(row=0, column=2, padx=8, pady=5)
+        self.make_word_action(btn_grid, text="View Vendors", command=self.view_vendors).grid(row=0, column=3, padx=8, pady=5)
+        # btn_grid2 = ctk.CTkFrame(main_container, fg_color="transparent")
+        # btn_grid2.pack(fill="x", pady=5)
+        self.make_word_action(btn_grid, text="Manage Bills", command=self.open_manage_bills).grid(row=0, column=4, padx=8, pady=5)
+        self.make_word_action(btn_grid, text="Profile", command=self.open_profile).grid(row=0, column=5, padx=8, pady=5)
 
         self.vendor_list_label = ctk.CTkLabel(main_container, text="Recent Vendors:", font=ctk.CTkFont(size=13, weight="bold"))
         self.vendor_list_label.pack(anchor="w", pady=(10, 3))
         self.vendor_list_frame = ctk.CTkFrame(main_container, fg_color="transparent")
         self.vendor_list_frame.pack(fill="x", pady=3)
         self.refresh_vendor_list()
+        self.auto_size_window_to_text(self, min_width=640, min_height=480)
 
     def refresh_vendor_list(self):
         if not hasattr(self, "vendor_list_frame"): return
@@ -399,7 +506,7 @@ class VendorApp(ctk.CTk):
         dialog = ctk.CTkToplevel(self)
         self.manage_bills_dialog = dialog
         dialog.title("Manage Bills")
-        dialog.geometry("900x600")
+        dialog.geometry("500x600")
         self.bring_dialog_to_front(dialog)
 
         def close_manage_bills():
@@ -412,9 +519,9 @@ class VendorApp(ctk.CTk):
         header_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         header_frame.pack(fill="x", padx=10, pady=10)
         ctk.CTkLabel(header_frame, text="Bill Management", font=ctk.CTkFont(size=18, weight="bold")).pack(side="left")
-        ctk.CTkButton(header_frame, text="+ Add New Bill", width=120, height=30, command=lambda: self.open_add_bill_dialog(dialog)).pack(side="right")
+        self.make_word_action(header_frame, text="+ Add New Bill", command=lambda: self.open_add_bill_dialog(dialog)).pack(side="right")
 
-        scroll_frame = ctk.CTkScrollableFrame(dialog, width=860, height=450)
+        scroll_frame = ctk.CTkScrollableFrame(dialog, width=480, height=520)
         scroll_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         bills = self.db.get_all_bills()
@@ -472,12 +579,13 @@ class VendorApp(ctk.CTk):
 
                 btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
                 btn_frame.pack(side="right", padx=10)
-                ctk.CTkButton(btn_frame, text="Edit", width=60, height=24, command=lambda b=bid: self.edit_bill(b)).pack(padx=2)
-                ctk.CTkButton(btn_frame, text="Delete", width=60, height=24, fg_color="#cc0000", hover_color="#990000", command=lambda b=bid: self.delete_bill(b)).pack(padx=2)
+                self.make_word_action(btn_frame, text="Edit", command=lambda b=bid: self.edit_bill(b)).pack(padx=2)
+                self.make_word_action(btn_frame, text="Delete", command=lambda b=bid: self.delete_bill(b), text_color="#ff6b6b", hover_text_color="#ff9a9a").pack(padx=2)
 
         btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         btn_frame.pack(pady=10)
-        ctk.CTkButton(btn_frame, text="Close", width=100, height=28, command=close_manage_bills).pack(pady=5)
+        self.make_word_action(btn_frame, text="Close", command=close_manage_bills).pack(pady=5)
+        self.auto_size_window_to_text(dialog, min_width=640, min_height=480)
 
     def open_add_bill_dialog(self, parent_window):
         add_win = ctk.CTkToplevel(parent_window)
@@ -589,8 +697,9 @@ class VendorApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(add_win, fg_color="transparent")
         btn_frame.pack(pady=15)
-        ctk.CTkButton(btn_frame, text="Save Bill", width=120, height=30, command=save_bill).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=add_win.destroy).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Save Bill", command=save_bill).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Cancel", command=add_win.destroy).pack(side="left", padx=10)
+        self.auto_size_window_to_text(add_win, min_width=420, min_height=560)
 
     def toggle_bill_status(self, bill_id, is_paid):
         try:
@@ -735,8 +844,9 @@ class VendorApp(ctk.CTk):
         # Button frame at bottom (outside main_frame, always visible)
         btn_frame = ctk.CTkFrame(edit_win, fg_color="transparent")
         btn_frame.pack(pady=10, fill="x", side="bottom")
-        ctk.CTkButton(btn_frame, text="Save Changes", width=120, height=30, command=save_edits).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=edit_win.destroy).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Save Changes", command=save_edits).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Cancel", command=edit_win.destroy).pack(side="left", padx=10)
+        self.auto_size_window_to_text(edit_win, min_width=420, min_height=560)
 
     def delete_bill(self, bill_id):
         if messagebox.askyesno("Delete Bill", "Are you sure you want to delete this bill?"):
@@ -811,8 +921,9 @@ class VendorApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(add_win, fg_color="transparent")
         btn_frame.pack(pady=15)
-        ctk.CTkButton(btn_frame, text="Save Vendor", width=120, height=30, command=save_vendor).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=add_win.destroy).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Save Vendor", command=save_vendor).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Cancel", command=add_win.destroy).pack(side="left", padx=10)
+        self.auto_size_window_to_text(add_win, min_width=420, min_height=560)
 
     # --- IMPLEMENTED: Add Payment Method ---
     def open_add_payment(self):
@@ -852,8 +963,9 @@ class VendorApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(add_win, fg_color="transparent")
         btn_frame.pack(pady=15)
-        ctk.CTkButton(btn_frame, text="Save", width=120, height=30, command=save_payment).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=add_win.destroy).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Save", command=save_payment).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Cancel", command=add_win.destroy).pack(side="left", padx=10)
+        self.auto_size_window_to_text(add_win, min_width=360, min_height=260)
 
     # --- IMPLEMENTED: View Vendors ---
     def view_vendors(self):
@@ -882,7 +994,8 @@ class VendorApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(view_win, fg_color="transparent")
         btn_frame.pack(pady=10)
-        ctk.CTkButton(btn_frame, text="Close", width=100, height=28, command=view_win.destroy).pack(pady=5)
+        self.make_word_action(btn_frame, text="Close", command=view_win.destroy).pack(pady=5)
+        self.auto_size_window_to_text(view_win, min_width=720, min_height=440)
 
     # --- IMPLEMENTED: Profile Management ---
     def open_profile(self):
@@ -933,8 +1046,9 @@ class VendorApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(profile_win, fg_color="transparent")
         btn_frame.pack(pady=15)
-        ctk.CTkButton(btn_frame, text="Save", width=120, height=30, command=save_profile).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="Cancel", width=120, height=30, command=profile_win.destroy).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Save", command=save_profile).pack(side="left", padx=10)
+        self.make_word_action(btn_frame, text="Cancel", command=profile_win.destroy).pack(side="left", padx=10)
+        self.auto_size_window_to_text(profile_win, min_width=420, min_height=420)
 
     # --- IMPLEMENTED: OCR Scanner ---
     def open_scanner(self):
@@ -981,8 +1095,9 @@ class VendorApp(ctk.CTk):
             text_box.insert("0.0", text)
             text_box.configure(state="disabled") # Read-only
 
-            ctk.CTkButton(result_win, text="Copy to Clipboard", command=lambda: self.copy_to_clipboard(text)).pack(pady=5)
-            ctk.CTkButton(result_win, text="Close", command=result_win.destroy).pack(pady=5)
+            self.make_word_action(result_win, text="Copy to Clipboard", command=lambda: self.copy_to_clipboard(text)).pack(pady=5)
+            self.make_word_action(result_win, text="Close", command=result_win.destroy).pack(pady=5)
+            self.auto_size_window_to_text(result_win, min_width=520, min_height=420)
 
         except Exception as e:
             messagebox.showerror("OCR Error", f"Failed to process image: {str(e)}")

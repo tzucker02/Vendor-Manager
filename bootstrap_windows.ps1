@@ -1,68 +1,1 @@
-param(
-    [switch]$RunApp,
-    [switch]$SkipSystem
-)
-
-$ErrorActionPreference = "Stop"
-
-function Test-CommandExists {
-    param([Parameter(Mandatory = $true)][string]$Name)
-    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
-}
-
-function Get-PythonCommand {
-    if (Test-CommandExists -Name "py") {
-        return @{
-            Exe = "py"
-            PrefixArgs = @("-3")
-        }
-    }
-    if (Test-CommandExists -Name "python") {
-        return @{
-            Exe = "python"
-            PrefixArgs = @()
-        }
-    }
-    return $null
-}
-
-function Install-Python {
-    if (Test-CommandExists -Name "winget") {
-        Write-Host "Installing Python via winget..."
-        & winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-        return
-    }
-
-    if (Test-CommandExists -Name "choco") {
-        Write-Host "Installing Python via Chocolatey..."
-        & choco install python -y
-        return
-    }
-
-    throw "Could not install Python automatically. Install Python 3.10+ and re-run this script."
-}
-
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $scriptDir
-
-$pythonCmd = Get-PythonCommand
-if (-not $pythonCmd) {
-    Install-Python
-    $pythonCmd = Get-PythonCommand
-}
-
-if (-not $pythonCmd) {
-    throw "Python still not found after installation attempt. Restart terminal and run script again."
-}
-
-$argsList = @("install.py")
-if ($RunApp) {
-    $argsList += "--run-app"
-}
-if ($SkipSystem) {
-    $argsList += "--skip-system"
-}
-
-$allArgs = @($pythonCmd.PrefixArgs + $argsList)
-Write-Host "Running installer with: $($pythonCmd.Exe) $($allArgs -join ' ')"
-& $pythonCmd.Exe @allArgs
+#Requires -Version 5.1<#.SYNOPSISBootstrap script for Vendor Manager on Windows..DESCRIPTIONChecks for Python and Tesseract, creates a virtual environment,and installs dependencies.#>$ErrorActionPreference = "Stop"Write-Host "========================================" -ForegroundColor CyanWrite-Host "  Vendor Manager - Windows Setup" -ForegroundColor CyanWrite-Host "========================================" -ForegroundColor CyanWrite-Host ""1. Check for PythonWrite-Host "[1/4] Checking for Python..." -ForegroundColor Yellowtry {$pythonPath = Get-Command python -ErrorAction SilentlyContinueif (-not $pythonPath) {throw "Python is not installed or not in PATH."}Write-Host "   Found: $$($$pythonPath.Source)" -ForegroundColor Green$pythonVersion = python --versionWrite-Host "   Version: $pythonVersion" -ForegroundColor Green} catch {Write-Host "   ERROR: Python not found. Please install Python 3.9+ from python.org" -ForegroundColor RedWrite-Host "   After installing, restart this script." -ForegroundColor Yellowexit 1}2. Check for Tesseract OCRWrite-Host ""Write-Host "[2/4] Checking for Tesseract OCR..." -ForegroundColor Yellowtry {$tesseractPath = Get-Command tesseract -ErrorAction SilentlyContinueif (-not $tesseractPath) {Write-Host "   WARNING: Tesseract not found in PATH." -ForegroundColor RedWrite-Host "   Tesseract is REQUIRED for the OCR scanning feature." -ForegroundColor RedWrite-Host ""$installChoice = Read-Host "Do you want to open the Tesseract download page? (Y/N)"        if ($installChoice -eq "Y" -or $installChoice -eq "y") {            Start-Process "https://github.com/UB-Mannheim/tesseract/wiki"            Write-Host ""            Write-Host "   INSTRUCTIONS:" -ForegroundColor Cyan            Write-Host "   1. Download the latest installer (e.g., tesseract-ocr-w64-setup-5.x.x.exe)." -ForegroundColor White            Write-Host "   2. Run the installer." -ForegroundColor White            Write-Host "   3. IMPORTANT: During installation, CHECK the box to 'Add Tesseract to PATH'." -ForegroundColor Yellow            Write-Host "   4. Restart this script after installation." -ForegroundColor White            exit 1        } else {            Write-Host "   Aborting. Tesseract is required for OCR." -ForegroundColor Red            exit 1        }    }    Write-Host "   Found: $$($$tesseractPath.Source)" -Fore

@@ -1,19 +1,20 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+echo "Installing Vendor Manager dependencies..."
+python3 -m pip install --upgrade pip
+pip3 install -r requirements.txt
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-
-if ! command -v python3 >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    echo "Installing Python via Homebrew..."
-    brew install python
-  else
-    echo "Python 3 is not installed and Homebrew is unavailable."
-    echo "Install Homebrew from https://brew.sh or install Python 3.10+ manually, then re-run."
-    exit 1
-  fi
+echo ""
+echo "Checking for Tesseract OCR..."
+if ! command -v tesseract &> /dev/null; then
+    echo "Tesseract not found. Installing via Homebrew..."
+    if ! command -v brew &> /dev/null; then
+        echo "Homebrew not found. Install from: https://brew.sh"
+        echo "Then run: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        exit 1
+    fi
+    brew install tesseract
 fi
 
-echo "Running installer with python3 install.py $*"
-python3 install.py "$@"
+echo ""
+echo "Dependencies installed successfully!"
+echo "Run: python3 vendor_manager.py"

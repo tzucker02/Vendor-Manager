@@ -1,46 +1,1 @@
-param(
-    [switch]$RunApp
-)
-
-$ErrorActionPreference = "Stop"
-
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $scriptDir
-
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if (-not $pythonCmd) {
-    throw "Python was not found in PATH. Install Python 3.10+ and try again."
-}
-
-$venvDir = Join-Path $scriptDir ".venv"
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
-
-if (-not (Test-Path $venvPython)) {
-    Write-Host "Creating virtual environment..."
-    & python -m venv $venvDir
-}
-
-if (-not (Test-Path $venvPython)) {
-    throw "Virtual environment creation failed."
-}
-
-Write-Host "Installing Python dependencies..."
-& $venvPython -m pip install --upgrade pip
-& $venvPython -m pip install -r (Join-Path $scriptDir "requirements.txt")
-
-$tesseract = Get-Command tesseract -ErrorAction SilentlyContinue
-if (-not $tesseract) {
-    Write-Warning "Tesseract OCR was not found in PATH. OCR scanning will not work until it is installed."
-    Write-Host "Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki"
-} else {
-    $tesseractVersion = (& tesseract --version | Select-Object -First 1)
-    Write-Host "Found $tesseractVersion"
-}
-
-Write-Host "Setup complete."
-Write-Host "To run the app manually:"
-Write-Host "  .\.venv\Scripts\python.exe .\vendor_manager.py"
-
-if ($RunApp) {
-    & $venvPython (Join-Path $scriptDir "vendor_manager.py")
-}
+#Requires -Version 5.1<#.SYNOPSIS    Comprehensive Setup Script for Vendor Manager on Windows..DESCRIPTION    Automates the installation of Python dependencies, Tesseract OCR,     and creates a portable environment for the Vendor Management System.#># --- Configuration ---$ProjectName = "VendorManager"$VenvName = "venv"$MainScript = "vendor_manager.py"$ReqFile = "requirements.txt"$TesseractUrl = "https://github.com/UB-Mannheim/tesseract/wiki"$WingetId = "UB-Mannheim.TesseractOCR"# --- Colors & Helpers ---function Write-Header {    param([string]$Text)    Clear-Host    Write-Host "==================================================" -ForegroundColor Cyan    Write-Host "  $ProjectName - Setup Wizard" -ForegroundColor Cyan    Write-Host "==================================================" -ForegroundColor Cyan    Write-Host ""    Write-Host ">> $Text" -ForegroundColor Yellow    Write-Host ""}function Write-Success {    param([string]$Text)    Write-Host "   [OK] $Text" -ForegroundColor Green}function Write-ErrorMsg {    param([string]$Text)    Write-Host "   [FAIL] $Text" -ForegroundColor Red}function Write-Warn {    param([string]$Text)    Write-Host "   [WARN] $Text" -ForegroundColor Magenta}# --- Step 1: Check Python ---Write-Header "Step 1: Checking Python Environment"$pythonExe = Get-Command python -ErrorAction SilentlyContinueif (-not $pythonExe) {    Write-ErrorMsg "Python is not installed or not in PATH."    Write-Host "   Please install Python 3.9+ from https://www.python.org/downloads/" -ForegroundColor White    Write-Host "   IMPORTANT: Check the box 'Add Python to
