@@ -1,20 +1,1 @@
-#!/bin/bash
-echo "Installing Vendor Manager dependencies..."
-python3 -m pip install --upgrade pip
-pip3 install -r requirements.txt
-
-echo ""
-echo "Checking for Tesseract OCR..."
-if ! command -v tesseract &> /dev/null; then
-    echo "Tesseract not found. Installing via Homebrew..."
-    if ! command -v brew &> /dev/null; then
-        echo "Homebrew not found. Install from: https://brew.sh"
-        echo "Then run: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-        exit 1
-    fi
-    brew install tesseract
-fi
-
-echo ""
-echo "Dependencies installed successfully!"
-echo "Run: python3 vendor_manager.py"
+#!/bin/bashset -eecho "========================================"echo "  Vendor Manager - macOS Setup"echo "========================================"echo ""# Parse argumentsSKIP_SYSTEM=falseRUN_APP=falsefor arg in "$@"; do    case $arg in        --skip-system) SKIP_SYSTEM=true ;;        --run-app) RUN_APP=true ;;    esacdoneecho "[1/4] Checking for Python 3..."if ! command -v python3 &> /dev/null; then    echo "   ERROR: Python 3 not found. Please install from https://www.python.org/downloads/"    exit 1fiPYTHON_VERSION=$(python3 --version)echo "   Found: $PYTHON_VERSION"echo ""echo "[2/4] Creating virtual environment..."python3 -m venv .venvsource .venv/bin/activateecho "   Virtual environment created and activated"echo ""echo "[3/4] Installing Python dependencies..."python -m pip install --upgrade pippip install -r requirements.txtecho "   Python dependencies installed"echo ""echo "[4/4] Checking for Tesseract OCR..."if ! command -v tesseract &> /dev/null; then    if [ "$SKIP_SYSTEM" = true ]; then        echo "   [WARN] Skipping Tesseract installation by request."        echo "   OCR feature will not work without Tesseract."    else        if ! command -v brew &> /dev/null; then            echo "   [WARN] Homebrew not found. Install from: https://brew.sh"            echo "   Then run: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""            echo "   After installing Homebrew, run: brew install tesseract"        else            echo "   Installing Tesseract via Homebrew..."            brew install tesseract        fi    fielse    TESS_VERSION=$(tesseract --version | head -n1)    echo "   Found: $TESS_VERSION"fiecho ""echo "========================================"echo "  Setup Complete!"echo "========================================"echo ""echo "To activate the environment and run the app:"echo "  source .venv/bin/activate"echo "  python vendor_manager.py"echo ""echo "Or run directly:"echo "  ./.venv/bin/python vendor_manager.py"echo ""if [ "$RUN_APP" = true ]; then    echo "Launching Vendor Manager..."    ./.venv/bin/python vendor_manager.pyfi
